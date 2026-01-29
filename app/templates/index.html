@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flask CI/CD Pipeline Demo</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1><i class="fas fa-rocket"></i> Flask CI/CD Pipeline</h1>
+            <p class="subtitle">Automated Deployment from Git Push to Production</p>
+        </header>
+
+        <div class="dashboard">
+            <div class="status-card success">
+                <h2><i class="fas fa-check-circle"></i> System Status</h2>
+                <p>All systems operational</p>
+                <div class="status-indicator"></div>
+            </div>
+
+            <div class="status-card info">
+                <h2><i class="fas fa-code-branch"></i> Pipeline</h2>
+                <p>Jenkins Automated</p>
+                <div class="status-indicator"></div>
+            </div>
+
+            <div class="status-card warning">
+                <h2><i class="fas fa-docker"></i> Container</h2>
+                <p>Docker Running</p>
+                <div class="status-indicator"></div>
+            </div>
+        </div>
+
+        <div class="content">
+            <div class="card">
+                <h2><i class="fas fa-project-diagram"></i> How It Works</h2>
+                <ol class="pipeline-steps">
+                    <li><i class="fas fa-code"></i> Developer pushes code to GitHub</li>
+                    <li><i class="fas fa-bell"></i> GitHub webhook triggers Jenkins</li>
+                    <li><i class="fas fa-cogs"></i> Jenkins runs automated tests</li>
+                    <li><i class="fas fa-docker"></i> Docker image is built and tested</li>
+                    <li><i class="fas fa-ship"></i> Container is deployed automatically</li>
+                    <li><i class="fas fa-check"></i> Application is live and monitored</li>
+                </ol>
+            </div>
+
+            <div class="card">
+                <h2><i class="fas fa-terminal"></i> API Endpoints</h2>
+                <div class="endpoints">
+                    <div class="endpoint">
+                        <span class="method get">GET</span>
+                        <code>/api/status</code>
+                        <span class="desc">Check application status</span>
+                    </div>
+                    <div class="endpoint">
+                        <span class="method get">GET</span>
+                        <code>/api/health</code>
+                        <span class="desc">Health check endpoint</span>
+                    </div>
+                    <div class="endpoint">
+                        <span class="method get">GET</span>
+                        <code>/api/info</code>
+                        <span class="desc">Application information</span>
+                    </div>
+                </div>
+                <button id="test-api" class="btn"><i class="fas fa-bolt"></i> Test API</button>
+                <div id="api-response" class="api-response"></div>
+            </div>
+        </div>
+
+        <div class="footer">
+            <p><i class="fas fa-info-circle"></i> This application demonstrates a complete CI/CD pipeline with Flask, Docker, and Jenkins</p>
+            <p class="timestamp">Server Time: <span id="current-time">Loading...</span></p>
+        </div>
+    </div>
+
+    <script>
+        // Update current time
+        function updateTime() {
+            const now = new Date();
+            document.getElementById('current-time').textContent = now.toLocaleString();
+        }
+        setInterval(updateTime, 1000);
+        updateTime();
+
+        // Test API button
+        document.getElementById('test-api').addEventListener('click', async function() {
+            const responseDiv = document.getElementById('api-response');
+            responseDiv.innerHTML = '<p><i class="fas fa-spinner fa-spin"></i> Testing API...</p>';
+            
+            try {
+                const response = await fetch('/api/status');
+                const data = await response.json();
+                
+                responseDiv.innerHTML = `
+                    <div class="success-message">
+                        <h4><i class="fas fa-check"></i> API Test Successful</h4>
+                        <pre>${JSON.stringify(data, null, 2)}</pre>
+                    </div>
+                `;
+            } catch (error) {
+                responseDiv.innerHTML = `
+                    <div class="error-message">
+                        <h4><i class="fas fa-times"></i> API Test Failed</h4>
+                        <p>${error.message}</p>
+                    </div>
+                `;
+            }
+        });
+
+        // Animate status indicators
+        document.querySelectorAll('.status-indicator').forEach(indicator => {
+            indicator.addEventListener('click', function() {
+                this.classList.toggle('pulse');
+                setTimeout(() => this.classList.remove('pulse'), 1000);
+            });
+        });
+    </script>
+</body>
+</html>
