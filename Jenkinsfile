@@ -4,14 +4,16 @@ pipeline {
     environment {
         DOCKER_IMAGE = 'flask-cicd-app'
         DOCKER_TAG = "${env.BUILD_ID}"
-        DOCKER_REGISTRY = 'your-docker-registry' // Change this
+        // Remove or update this based on your Docker registry
+        // DOCKER_REGISTRY = 'your-docker-registry'
     }
     
     stages {
         stage('Checkout') {
             steps {
+                // FIXED: Use YOUR GitHub username
                 git branch: 'main', 
-                    url: 'https://github.com/yourusername/flask-cicd-project.git' // Change this
+                    url: 'https://github.com/anees-rehman1/flask-cicd-project.git'
                 echo '✅ Code checked out successfully'
             }
         }
@@ -21,7 +23,9 @@ pipeline {
                 script {
                     sh 'python --version'
                     sh 'pip --version'
-                    sh 'pip install -r requirements.txt'
+                    // Use virtual environment
+                    sh 'python -m venv venv'
+                    sh '. venv/bin/activate && pip install -r requirements.txt'
                 }
                 echo '✅ Python environment setup complete'
             }
@@ -30,7 +34,7 @@ pipeline {
         stage('Run Tests') {
             steps {
                 script {
-                    sh 'pytest tests/ --verbose --junitxml=test-results.xml'
+                    sh '. venv/bin/activate && pytest tests/ --verbose --junitxml=test-results.xml'
                 }
                 echo '✅ Tests completed successfully'
             }
@@ -44,8 +48,8 @@ pipeline {
         stage('Security Scan') {
             steps {
                 script {
-                    sh 'pip install bandit'
-                    sh 'bandit -r app/ -f json -o security-report.json || true'
+                    sh '. venv/bin/activate && pip install bandit || true'
+                    sh '. venv/bin/activate && bandit -r app/ -f json -o security-report.json || true'
                 }
                 echo '🔒 Security scan completed'
             }
@@ -66,8 +70,9 @@ pipeline {
                 script {
                     sh "docker run -d -p 5001:5000 --name test-container ${DOCKER_IMAGE}:${DOCKER_TAG}"
                     sleep 10
-                    sh 'curl -f http://localhost:5001/api/health || exit 1'
-                    sh 'docker stop test-container && docker rm test-container'
+                    sh 'curl -f http://localhost:5001/api/health || (docker logs test-container && exit 1)'
+                    sh 'docker stop test-container || true'
+                    sh 'docker rm test-container || true'
                 }
                 echo '✅ Docker container test passed'
             }
@@ -79,10 +84,11 @@ pipeline {
             }
             steps {
                 script {
-                    // Uncomment and configure your Docker registry
+                    echo '📦 Image built successfully'
+                    echo 'To push to registry, configure DOCKER_REGISTRY variable'
+                    // Uncomment when you have a registry
                     // sh "docker push ${DOCKER_REGISTRY}/${DOCKER_IMAGE}:${DOCKER_TAG}"
                     // sh "docker push ${DOCKER_REGISTRY}/${DOCKER_IMAGE}:latest"
-                    echo '📦 Image ready for deployment'
                 }
             }
         }
@@ -93,10 +99,10 @@ pipeline {
             }
             steps {
                 script {
-                    echo '🚀 Deploying application...'
+                    echo '🚀 Application ready for deployment'
+                    echo 'Docker Image: flask-cicd-app:latest'
+                    echo 'To deploy: docker run -d -p 5000:5000 flask-cicd-app:latest'
                     // Add your deployment commands here
-                    // Example: kubectl apply, docker-compose up, etc.
-                    echo '✅ Deployment completed'
                 }
             }
         }
@@ -104,16 +110,20 @@ pipeline {
     
     post {
         always {
-            echo 'Pipeline completed'
+            echo 'Cleaning up workspace...'
+            // Clean up Docker containers
+            sh 'docker stop test-container || true'
+            sh 'docker rm test-container || true'
             cleanWs()
         }
         success {
             echo '🎉 Pipeline succeeded!'
-            // Add notification (Slack, email, etc.)
+            echo 'Your Flask app is ready at: http://localhost:5000'
+            echo 'To run: docker run -d -p 5000:5000 flask-cicd-app:latest'
         }
         failure {
             echo '❌ Pipeline failed!'
-            // Add notification (Slack, email, etc.)
+            echo 'Check the error messages above'
         }
     }
 }
