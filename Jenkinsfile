@@ -2,18 +2,17 @@ pipeline {
     agent any
     
     environment {
-        DOCKER_IMAGE = 'shadow1234090/ci-cd-pipeline'
+        DOCKERHUB_CREDENTIALS = credentials('dockerhub-credentials')
+        DOCKER_IMAGE = 'yourdockerhubusername/flask-cicd-app'  // CHANGE THIS
         DOCKER_TAG = "${env.BUILD_NUMBER}"
-        // Docker Hub credentials - set these in Jenkins
-        DOCKER_REGISTRY_CREDENTIALS = 'docker-hub-credentials'
-        VENV_PATH = "${WORKSPACE}/venv"
+        GIT_REPO = 'https://github.com/yourusername/flask-cicd-project.git'  // CHANGE THIS
     }
     
     stages {
         stage('Checkout') {
             steps {
                 git branch: 'main', 
-                    url: 'https://github.com/anees-rehman1/flask-cicd-project.git' // Update with your repo
+                    url: '${GIT_REPO}'
                 echo '✅ Code checked out successfully'
             }
         }
@@ -22,15 +21,12 @@ pipeline {
             steps {
                 script {
                     sh '''
-                        echo "=== System Information ==="
-                        uname -a
-                        echo "Python: $(python3 --version 2>/dev/null || python --version 2>/dev/null || echo 'Not found')"
-                        echo "Docker: $(docker --version 2>/dev/null || echo 'Not found')"
+                        echo "Setting up Python environment..."
+                        python3 --version
+                        pip3 --version
                         
                         # Create virtual environment
-                        python3 -m venv "${VENV_PATH}" || python -m venv "${VENV_PATH}"
-                        . "${VENV_PATH}/bin/activate"
-                        python -m pip install --upgrade pip
+                        python3 -m venv venv || python -m venv venv
                     '''
                 }
             }
@@ -39,11 +35,13 @@ pipeline {
         stage('Install Dependencies') {
             steps {
                 script {
-                    sh """
-                        . "${VENV_PATH}/bin/activate"
+                    sh '''
+                        # Activate virtual environment and install dependencies
+                        . venv/bin/activate
+                        pip install --upgrade pip
                         pip install -r requirements.txt
-                    """
-                    echo '✅ Dependencies installed'
+                        echo "✅ Dependencies installed"
+                    '''
                 }
             }
         }
@@ -51,10 +49,12 @@ pipeline {
         stage('Run Tests') {
             steps {
                 script {
-                    sh """
-                        . "${VENV_PATH}/bin/activate"
+                    sh '''
+                        . venv/bin/activate
+                        echo "Running tests..."
                         pytest tests/ --verbose --junitxml=test-results.xml
-                    """
+                        echo "✅ Tests completed"
+                    '''
                 }
                 post {
                     always {
@@ -65,123 +65,77 @@ pipeline {
         }
         
         stage('Build Docker Image') {
-            when {
-                expression { 
-                    // Only run if Docker is available
-                    sh(script: 'docker --version', returnStatus: true) == 0 
-                }
-            }
             steps {
                 script {
-                    sh """
-                        echo "Building Docker image: ${DOCKER_IMAGE}:${DOCKER_TAG}"
+                    sh '''
+                        echo "Building Docker image..."
                         docker build -t ${DOCKER_IMAGE}:${DOCKER_TAG} .
                         docker tag ${DOCKER_IMAGE}:${DOCKER_TAG} ${DOCKER_IMAGE}:latest
-                        echo "✅ Docker image built"
-                        
-                        # List images to verify
-                        docker images | grep ${DOCKER_IMAGE}
-                    """
+                        echo "✅ Docker image built: ${DOCKER_IMAGE}:${DOCKER_TAG}"
+                    '''
                 }
             }
         }
         
         stage('Test Docker Container') {
-            when {
-                expression { 
-                    sh(script: 'docker --version', returnStatus: true) == 0 
-                }
-            }
             steps {
                 script {
                     sh '''
-                        # Clean up any existing container
-                        docker stop flask-test-container 2>/dev/null || true
-                        docker rm flask-test-container 2>/dev/null || true
+                        echo "Testing Docker container..."
+                        docker run -d -p 5001:5000 --name flask-test-container ${DOCKER_IMAGE}:${DOCKER_TAG}
+                        sleep 10
                         
-                        # Run container
-                        docker run -d -p 5001:5000 --name flask-test-container shadow1234090/ci-cd-pipeline:latest
+                        # Check if container is running
+                        docker ps | grep flask-test-container
                         
-                        # Wait for container to start
-                        echo "Waiting for container to start..."
-                        sleep 5
+                        # Test the API endpoint
+                        curl -f http://localhost:5001/api/health || exit 1
+                        curl -f http://localhost:5001/api/status || exit 1
                         
-                        # Test the container
-                        echo "Testing container..."
-                        curl -f http://localhost:5001/api/health || \
-                        curl -f http://localhost:5001/api/status || \
-                        { echo "Container test failed"; exit 1; }
-                        
-                        echo "✅ Docker container is working!"
-                        
-                        # Clean up
+                        # Stop and remove test container
                         docker stop flask-test-container
                         docker rm flask-test-container
+                        echo "✅ Docker container test passed"
                     '''
                 }
             }
         }
         
         stage('Login to Docker Hub') {
-            when {
-                expression { 
-                    sh(script: 'docker --version', returnStatus: true) == 0 
-                }
-                branch 'main'
-            }
             steps {
                 script {
-                    withCredentials([usernamePassword(
-                        credentialsId: 'docker-hub-credentials',
-                        usernameVariable: 'DOCKER_USERNAME',
-                        passwordVariable: 'DOCKER_PASSWORD'
-                    )]) {
-                        sh """
-                            echo "Logging into Docker Hub as ${DOCKER_USERNAME}"
-                            echo "${DOCKER_PASSWORD}" | docker login -u "${DOCKER_USERNAME}" --password-stdin
-                        """
-                    }
+                    sh '''
+                        echo "Logging into Docker Hub..."
+                        echo ${DOCKERHUB_CREDENTIALS_PSW} | docker login -u ${DOCKERHUB_CREDENTIALS_USR} --password-stdin
+                        echo "✅ Logged into Docker Hub"
+                    '''
                 }
             }
         }
         
         stage('Push to Docker Hub') {
-            when {
-                expression { 
-                    sh(script: 'docker --version', returnStatus: true) == 0 
-                }
-                branch 'main'
-            }
             steps {
                 script {
-                    sh """
-                        echo "Pushing to Docker Hub..."
+                    sh '''
+                        echo "Pushing images to Docker Hub..."
                         docker push ${DOCKER_IMAGE}:${DOCKER_TAG}
                         docker push ${DOCKER_IMAGE}:latest
                         echo "✅ Images pushed to Docker Hub"
-                    """
+                    '''
                 }
             }
         }
         
         stage('Deploy') {
-            when {
-                branch 'main'
-            }
             steps {
                 script {
-                    echo '🚀 Deployment Stage'
-                    echo 'Configure your deployment here (Kubernetes, Docker Swarm, etc.)'
-                    
-                    // Example for simple Docker deployment:
-                    // sh '''
-                    //     docker stop production-app 2>/dev/null || true
-                    //     docker rm production-app 2>/dev/null || true
-                    //     docker run -d -p 5000:5000 --name production-app shadow1234090/ci-cd-pipeline:latest
-                    // '''
-                    
-                    echo '✅ Deployment completed'
-                    echo 'Application URL: http://your-server:5000'
+                    sh '''
+                        echo "🚀 Starting deployment..."
+                        echo "Deployment would happen here"
+                        echo "Example: kubectl apply -f deployment.yaml"
+                        echo "Example: docker-compose -f production.yml up -d"
+                        echo "✅ Deployment simulation complete"
+                    '''
                 }
             }
         }
@@ -189,32 +143,28 @@ pipeline {
     
     post {
         always {
-            echo '=== Pipeline Cleanup ==='
-            script {
-                // Clean up Docker containers
-                sh '''
-                    docker stop flask-test-container 2>/dev/null || true
-                    docker rm flask-test-container 2>/dev/null || true
-                    echo "Cleanup completed"
-                '''
-            }
-            cleanWs()
+            sh '''
+                echo "Cleaning up..."
+                docker stop flask-test-container 2>/dev/null || true
+                docker rm flask-test-container 2>/dev/null || true
+                echo "Cleanup completed"
+            '''
         }
         success {
-            echo '🎉 Pipeline SUCCESS!'
-            // Optional: Send success notification
+            echo '🎉 Pipeline succeeded!'
+            // Send notification (Slack/Email)
+            sh '''
+                echo "Sending success notification..."
+                # Add your notification commands here
+            '''
         }
         failure {
-            echo '❌ Pipeline FAILED!'
-            // Optional: Send failure notification
+            echo '❌ Pipeline failed!'
+            // Send notification (Slack/Email)
+            sh '''
+                echo "Sending failure notification..."
+                # Add your notification commands here
+            '''
         }
-        unstable {
-            echo '⚠️ Pipeline UNSTABLE!'
-        }
-    }
-    
-    options {
-        timeout(time: 30, unit: 'MINUTES')
-        buildDiscarder(logRotator(numToKeepStr: '10'))
     }
 }
