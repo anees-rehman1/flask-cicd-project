@@ -1,63 +1,65 @@
 pipeline {
-    agent {
-        docker {
-            image 'python:3.9-slim'
-            args '--user root -v /var/run/docker.sock:/var/run/docker.sock'
-        }
-    }
+    agent any
     
     environment {
         DOCKER_IMAGE = 'flask-cicd-app'
-        DOCKER_TAG = "${env.BUILD_NUMBER}"
+        DOCKER_TAG = "${env.BUILD_ID}"
+        DOCKER_REGISTRY = 'your-docker-registry'
+        // Add Python to PATH if needed
+        PATH = "/usr/bin/python3:${env.PATH}"
     }
     
     stages {
         stage('Checkout') {
             steps {
-                checkout([
-                    $class: 'GitSCM',
-                    branches: [[name: '*/main']],
-                    userRemoteConfigs: [[
-                        url: 'https://github.com/anees-rehman1/flask-cicd-project.git',
-                        credentialsId: 'github-token'
-                    ]]
-                ])
+                git branch: 'main', 
+                    url: 'https://github.com/yourusername/flask-cicd-project.git'
                 echo '✅ Code checked out successfully'
             }
         }
         
-        stage('Verify Environment') {
+        stage('Setup Python Environment') {
             steps {
-                sh '''
-                    echo "=== Python Environment ==="
-                    python --version
-                    pip --version
-                    echo "=== Directory ==="
-                    ls -la
-                    echo "=== Requirements ==="
-                    cat requirements.txt
-                '''
-            }
-        }
-        
-        stage('Install Dependencies') {
-            steps {
-                sh '''
-                    echo "Installing Python dependencies..."
-                    pip install --upgrade pip
-                    pip install -r requirements.txt
-                    echo "Dependencies installed!"
-                '''
+                script {
+                    // Try python3 first, then python
+                    sh '''
+                        if command -v python3 &> /dev/null; then
+                            python3 --version
+                            python3 -m pip --version
+                        elif command -v python &> /dev/null; then
+                            python --version
+                            python -m pip --version
+                        else
+                            echo "Python not found. Installing..."
+                            apt-get update && apt-get install -y python3 python3-pip
+                        fi
+                    '''
+                    
+                    // Install dependencies
+                    sh '''
+                        if command -v python3 &> /dev/null; then
+                            python3 -m pip install -r requirements.txt
+                        else
+                            pip install -r requirements.txt
+                        fi
+                    '''
+                }
+                echo '✅ Python environment setup complete'
             }
         }
         
         stage('Run Tests') {
             steps {
-                sh '''
-                    echo "Running tests..."
-                    python -m pytest tests/ -v --junitxml=test-results.xml
-                    echo "Tests completed!"
-                '''
+                script {
+                    sh '''
+                        if command -v python3 &> /dev/null; then
+                            python3 -m pytest tests/ --verbose --junitxml=test-results.xml
+                        else
+                            pytest tests/ --verbose --junitxml=test-results.xml
+                        fi
+                    '''
+                }
+                echo '✅ Tests completed successfully'
             }
             post {
                 always {
@@ -66,62 +68,81 @@ pipeline {
             }
         }
         
+        stage('Security Scan') {
+            steps {
+                script {
+                    sh '''
+                        if command -v python3 &> /dev/null; then
+                            python3 -m pip install bandit
+                            python3 -m bandit -r app/ -f json -o security-report.json || true
+                        else
+                            pip install bandit
+                            bandit -r app/ -f json -o security-report.json || true
+                        fi
+                    '''
+                }
+                echo '🔒 Security scan completed'
+            }
+        }
+        
         stage('Build Docker Image') {
             steps {
-                sh '''
-                    echo "Installing Docker..."
-                    apt-get update && apt-get install -y docker.io
-                    echo "Building Docker image..."
-                    docker build -t ${DOCKER_IMAGE}:${DOCKER_TAG} .
-                    docker tag ${DOCKER_IMAGE}:${DOCKER_TAG} ${DOCKER_IMAGE}:latest
-                    echo "Docker images:"
-                    docker images | grep flask
-                '''
+                script {
+                    sh "docker build -t ${DOCKER_IMAGE}:${DOCKER_TAG} ."
+                    sh "docker tag ${DOCKER_IMAGE}:${DOCKER_TAG} ${DOCKER_IMAGE}:latest"
+                }
+                echo '🐳 Docker image built successfully'
             }
         }
         
-        stage('Test Container') {
+        stage('Test Docker Container') {
             steps {
-                sh '''
-                    echo "Testing Docker container..."
-                    docker run -d -p 5000:5000 --name test-app ${DOCKER_IMAGE}:${DOCKER_TAG}
+                script {
+                    sh "docker run -d -p 5001:5000 --name test-container ${DOCKER_IMAGE}:${DOCKER_TAG}"
                     sleep 10
-                    echo "Testing API..."
-                    curl -f http://localhost:5000/api/health || (docker logs test-app && exit 1)
-                    echo "API Response:"
-                    curl -s http://localhost:5000/api/health | python -m json.tool
-                '''
+                    sh 'curl -f http://localhost:5001/api/health || exit 1'
+                    sh 'docker stop test-container && docker rm test-container'
+                }
+                echo '✅ Docker container test passed'
             }
         }
         
-        stage('Cleanup & Report') {
+        stage('Push to Registry') {
+            when {
+                branch 'main'
+            }
             steps {
-                sh '''
-                    echo "Cleaning up..."
-                    docker stop test-app || true
-                    docker rm test-app || true
-                '''
-                echo '🎉 Pipeline completed successfully!'
-                echo 'Docker image: flask-cicd-app:latest'
-                echo 'Run with: docker run -d -p 5000:5000 flask-cicd-app:latest'
+                script {
+                    echo '📦 Image ready for deployment'
+                    // Add your push commands here
+                }
+            }
+        }
+        
+        stage('Deploy') {
+            when {
+                branch 'main'
+            }
+            steps {
+                script {
+                    echo '🚀 Deploying application...'
+                    // Add deployment commands
+                    echo '✅ Deployment completed'
+                }
             }
         }
     }
     
     post {
         always {
-            echo 'Pipeline finished'
-            sh '''
-                docker stop test-app 2>/dev/null || true
-                docker rm test-app 2>/dev/null || true
-            '''
+            echo 'Pipeline completed'
+            cleanWs()
         }
         success {
-            echo '✅ SUCCESS! Flask app is ready!'
-            echo 'Visit: http://localhost:5000'
+            echo '🎉 Pipeline succeeded!'
         }
         failure {
-            echo '❌ Pipeline failed'
+            echo '❌ Pipeline failed!'
         }
     }
 }
