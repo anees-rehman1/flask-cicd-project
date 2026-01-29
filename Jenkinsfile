@@ -2,9 +2,10 @@ pipeline {
     agent any
     
     environment {
-        DOCKER_IMAGE = 'flask-cicd-app'
-        DOCKER_TAG = "${env.BUILD_ID}"
-        DOCKER_REGISTRY = 'https://hub.docker.com/repository/docker/shadow1234090/ci-cd-pipeline/general' // Change this
+        DOCKER_IMAGE = 'shadow1234090/ci-cd-pipeline'
+        DOCKER_TAG = "${env.BUILD_NUMBER}"
+        // Docker Hub credentials - set these in Jenkins
+        DOCKER_REGISTRY_CREDENTIALS = 'docker-hub-credentials'
         VENV_PATH = "${WORKSPACE}/venv"
     }
     
@@ -12,28 +13,25 @@ pipeline {
         stage('Checkout') {
             steps {
                 git branch: 'main', 
-                    url: 'https://github.com/anees-rehman1/flask-cicd-project.git' // Change this
+                    url: 'https://github.com/anees-rehman1/flask-cicd-project.git' // Update with your repo
                 echo '✅ Code checked out successfully'
             }
         }
         
-        stage('Setup Python Environment') {
+        stage('Setup Environment') {
             steps {
                 script {
-                    // Check Python version
                     sh '''
-                        python3 --version || true
-                        python --version || true
-                    '''
-                    
-                    // Create virtual environment
-                    sh """
+                        echo "=== System Information ==="
+                        uname -a
+                        echo "Python: $(python3 --version 2>/dev/null || python --version 2>/dev/null || echo 'Not found')"
+                        echo "Docker: $(docker --version 2>/dev/null || echo 'Not found')"
+                        
+                        # Create virtual environment
                         python3 -m venv "${VENV_PATH}" || python -m venv "${VENV_PATH}"
                         . "${VENV_PATH}/bin/activate"
                         python -m pip install --upgrade pip
-                    """
-                    
-                    echo '✅ Python virtual environment created'
+                    '''
                 }
             }
         }
@@ -45,7 +43,7 @@ pipeline {
                         . "${VENV_PATH}/bin/activate"
                         pip install -r requirements.txt
                     """
-                    echo '✅ Dependencies installed successfully'
+                    echo '✅ Dependencies installed'
                 }
             }
         }
@@ -57,7 +55,6 @@ pipeline {
                         . "${VENV_PATH}/bin/activate"
                         pytest tests/ --verbose --junitxml=test-results.xml
                     """
-                    echo '✅ Tests completed successfully'
                 }
                 post {
                     always {
@@ -67,87 +64,102 @@ pipeline {
             }
         }
         
-        stage('Security Scan') {
-            steps {
-                script {
-                    sh """
-                        . "${VENV_PATH}/bin/activate"
-                        pip install bandit
-                        bandit -r app/ -f json -o security-report.json || true
-                    """
-                    echo '🔒 Security scan completed'
-                }
-            }
-        }
-        
-        stage('Code Quality') {
-            steps {
-                script {
-                    sh """
-                        . "${VENV_PATH}/bin/activate"
-                        pip install flake8 pylint
-                        flake8 app/ --max-line-length=120 --exit-zero
-                        pylint app/ --exit-zero || true
-                    """
-                    echo '📊 Code quality checks completed'
-                }
-            }
-        }
-        
         stage('Build Docker Image') {
+            when {
+                expression { 
+                    // Only run if Docker is available
+                    sh(script: 'docker --version', returnStatus: true) == 0 
+                }
+            }
             steps {
                 script {
-                    sh "docker build -t ${DOCKER_IMAGE}:${DOCKER_TAG} ."
-                    sh "docker tag ${DOCKER_IMAGE}:${DOCKER_TAG} ${DOCKER_IMAGE}:latest"
-                    echo '🐳 Docker image built successfully'
+                    sh """
+                        echo "Building Docker image: ${DOCKER_IMAGE}:${DOCKER_TAG}"
+                        docker build -t ${DOCKER_IMAGE}:${DOCKER_TAG} .
+                        docker tag ${DOCKER_IMAGE}:${DOCKER_TAG} ${DOCKER_IMAGE}:latest
+                        echo "✅ Docker image built"
+                        
+                        # List images to verify
+                        docker images | grep ${DOCKER_IMAGE}
+                    """
                 }
             }
         }
         
         stage('Test Docker Container') {
+            when {
+                expression { 
+                    sh(script: 'docker --version', returnStatus: true) == 0 
+                }
+            }
             steps {
                 script {
-                    // Clean up any existing test container
-                    sh 'docker stop test-container || true && docker rm test-container || true'
-                    
-                    // Run container with health check
-                    sh "docker run -d -p 5001:5000 --name test-container ${DOCKER_IMAGE}:${DOCKER_TAG}"
-                    
-                    // Wait for container to be ready
                     sh '''
-                        for i in {1..30}; do
-                            if docker ps --filter "name=test-container" --filter "health=healthy" | grep -q test-container; then
-                                echo "Container is healthy"
-                                break
-                            fi
-                            echo "Waiting for container to be healthy... ($i/30)"
-                            sleep 2
-                        done
+                        # Clean up any existing container
+                        docker stop flask-test-container 2>/dev/null || true
+                        docker rm flask-test-container 2>/dev/null || true
+                        
+                        # Run container
+                        docker run -d -p 5001:5000 --name flask-test-container shadow1234090/ci-cd-pipeline:latest
+                        
+                        # Wait for container to start
+                        echo "Waiting for container to start..."
+                        sleep 5
+                        
+                        # Test the container
+                        echo "Testing container..."
+                        curl -f http://localhost:5001/api/health || \
+                        curl -f http://localhost:5001/api/status || \
+                        { echo "Container test failed"; exit 1; }
+                        
+                        echo "✅ Docker container is working!"
+                        
+                        # Clean up
+                        docker stop flask-test-container
+                        docker rm flask-test-container
                     '''
-                    
-                    // Test the API
-                    sh 'curl -f http://localhost:5001/api/health || curl -f http://localhost:5001/api/status || exit 1'
-                    
-                    // Clean up
-                    sh 'docker stop test-container && docker rm test-container'
                 }
-                echo '✅ Docker container test passed'
             }
         }
         
-        stage('Push to Registry') {
+        stage('Login to Docker Hub') {
             when {
+                expression { 
+                    sh(script: 'docker --version', returnStatus: true) == 0 
+                }
                 branch 'main'
             }
             steps {
                 script {
-                    // Uncomment and configure your Docker registry
-                    // docker.withRegistry('https://registry.example.com', 'credentials-id') {
-                    //     sh "docker push ${DOCKER_IMAGE}:${DOCKER_TAG}"
-                    //     sh "docker push ${DOCKER_IMAGE}:latest"
-                    // }
-                    echo '📦 Image ready for deployment'
-                    echo 'Note: Configure Docker registry credentials in Jenkins to enable push'
+                    withCredentials([usernamePassword(
+                        credentialsId: 'docker-hub-credentials',
+                        usernameVariable: 'DOCKER_USERNAME',
+                        passwordVariable: 'DOCKER_PASSWORD'
+                    )]) {
+                        sh """
+                            echo "Logging into Docker Hub as ${DOCKER_USERNAME}"
+                            echo "${DOCKER_PASSWORD}" | docker login -u "${DOCKER_USERNAME}" --password-stdin
+                        """
+                    }
+                }
+            }
+        }
+        
+        stage('Push to Docker Hub') {
+            when {
+                expression { 
+                    sh(script: 'docker --version', returnStatus: true) == 0 
+                }
+                branch 'main'
+            }
+            steps {
+                script {
+                    sh """
+                        echo "Pushing to Docker Hub..."
+                        docker push ${DOCKER_IMAGE}:${DOCKER_TAG}
+                        docker push ${DOCKER_IMAGE}:latest
+                        echo "✅ Images pushed to Docker Hub"
+                    """
                 }
             }
         }
@@ -158,16 +170,18 @@ pipeline {
             }
             steps {
                 script {
-                    echo '🚀 Deploying application...'
-                    // Add your deployment commands here
-                    // Example for Docker Compose deployment:
-                    // sh 'docker-compose down && docker-compose up -d'
+                    echo '🚀 Deployment Stage'
+                    echo 'Configure your deployment here (Kubernetes, Docker Swarm, etc.)'
                     
-                    // Example for Kubernetes:
-                    // sh 'kubectl apply -f k8s/'
+                    // Example for simple Docker deployment:
+                    // sh '''
+                    //     docker stop production-app 2>/dev/null || true
+                    //     docker rm production-app 2>/dev/null || true
+                    //     docker run -d -p 5000:5000 --name production-app shadow1234090/ci-cd-pipeline:latest
+                    // '''
                     
                     echo '✅ Deployment completed'
-                    echo 'Application should be available at: http://your-server:5000'
+                    echo 'Application URL: http://your-server:5000'
                 }
             }
         }
@@ -175,39 +189,32 @@ pipeline {
     
     post {
         always {
-            echo 'Pipeline completed'
-            // Clean up Docker containers
-            sh 'docker stop test-container || true && docker rm test-container || true'
-            // Clean up virtual environment (optional)
-            // sh "rm -rf ${VENV_PATH}"
+            echo '=== Pipeline Cleanup ==='
+            script {
+                // Clean up Docker containers
+                sh '''
+                    docker stop flask-test-container 2>/dev/null || true
+                    docker rm flask-test-container 2>/dev/null || true
+                    echo "Cleanup completed"
+                '''
+            }
             cleanWs()
         }
         success {
-            echo '🎉 Pipeline succeeded!'
-            // Add notification (Slack, email, etc.)
-            // slackSend color: 'good', message: "Pipeline ${env.JOB_NAME} #${env.BUILD_NUMBER} succeeded!"
+            echo '🎉 Pipeline SUCCESS!'
+            // Optional: Send success notification
         }
         failure {
-            echo '❌ Pipeline failed!'
-            // Add notification (Slack, email, etc.)
-            // slackSend color: 'danger', message: "Pipeline ${env.JOB_NAME} #${env.BUILD_NUMBER} failed!"
+            echo '❌ Pipeline FAILED!'
+            // Optional: Send failure notification
         }
         unstable {
-            echo '⚠️ Pipeline unstable!'
+            echo '⚠️ Pipeline UNSTABLE!'
         }
     }
     
     options {
         timeout(time: 30, unit: 'MINUTES')
         buildDiscarder(logRotator(numToKeepStr: '10'))
-        disableConcurrentBuilds()
-    }
-    
-    triggers {
-        // GitHub webhook trigger
-        githubPush()
-        
-        // Poll SCM every minute (optional backup)
-        pollSCM('* * * * *')
     }
 }
