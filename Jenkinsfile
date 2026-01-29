@@ -13,7 +13,7 @@ pipeline {
         stage('Checkout') {
             steps {
                 git branch: 'main', 
-                    url: 'https://github.com/yourusername/flask-cicd-project.git'
+                    url: 'https://github.com/anees-rehman1/flask-cicd-project.git'
                 echo '✅ Code checked out successfully'
             }
         }
