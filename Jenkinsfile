@@ -3,9 +3,9 @@ pipeline {
     
     environment {
         DOCKERHUB_CREDENTIALS = credentials('dockerhub-credentials')
-        DOCKER_IMAGE = 'yourdockerhubusername/flask-cicd-app'  // CHANGE THIS
+        DOCKER_IMAGE = 'shadow1234090/flask-cicd-app'  
         DOCKER_TAG = "${env.BUILD_NUMBER}"
-        GIT_REPO = 'https://github.com/anees-rehman1/flask-cicd-project.git'  // CHANGE THIS
+        GIT_REPO = 'https://github.com/anees-rehman1/flask-cicd-project.git'  
     }
     
     stages {
