@@ -55,13 +55,13 @@ pipeline {
                         echo "✅ Tests completed"
                     '''
                 }
+            }
                 post {
                     always {
                         junit 'test-results.xml'
                     }
                 }
             }
-        }
         
         stage('Build Docker Image') {
             steps {
