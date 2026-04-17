@@ -11,8 +11,6 @@ pipeline {
     stages {
         stage('Checkout') {
             steps {
-                git branch: 'main', 
-                    url: '${GIT_REPO}'
                 checkout scm
                 echo '✅ Code checked out successfully'
             }
